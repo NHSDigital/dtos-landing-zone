@@ -1,68 +1,68 @@
-namespace addParticipant;
+namespace NHS.CohortManager.Tests.ParticipantManagementServiceTests;
+
 using Common;
-using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Net;
 using Moq;
-using System.Text;
 using System.Text.Json;
 using Model;
+using addParticipant;
+using NHS.CohortManager.Tests.TestUtils;
 
 [TestClass]
 public class AddNewParticipantTestClass
 {
-    private readonly Mock<ILogger<AddParticipantFunction>> loggerMock;
-    private readonly Mock<ICallFunction> callFunctionMock;
-    private readonly ServiceCollection serviceCollection;
-    private readonly Mock<FunctionContext> context;
-    private readonly Mock<HttpRequestData> request;
-    private readonly Mock<ICreateResponse> createResponse;
-    private readonly Mock<HttpWebResponse> webResponse;
+    private readonly Mock<ILogger<AddParticipantFunction>> _loggerMock = new();
+    private readonly Mock<ICallFunction> _callFunctionMock = new();
+    private readonly Mock<ICreateResponse> _createResponse = new();
+    private readonly Mock<HttpWebResponse> _webResponse = new();
+    private readonly Mock<ICheckDemographic> _checkDemographic = new();
+    private readonly Mock<ICreateParticipant> _createParticipant = new();
+    private readonly ParticipantCsvRecord _participantCsvRecord;
+    private readonly SetupRequest _setupRequest = new();
+    private Mock<HttpRequestData> _request;
 
-    Participant participant;
     public AddNewParticipantTestClass()
     {
         Environment.SetEnvironmentVariable("DSaddParticipant", "DSaddParticipant");
         Environment.SetEnvironmentVariable("DSmarkParticipantAsEligible", "DSmarkParticipantAsEligible");
+        Environment.SetEnvironmentVariable("DemographicURIGet", "DemographicURIGet");
 
-        loggerMock = new Mock<ILogger<AddParticipantFunction>>();
-        createResponse = new Mock<ICreateResponse>();
-        callFunctionMock = new Mock<ICallFunction>();
-        context = new Mock<FunctionContext>();
-        request = new Mock<HttpRequestData>(context.Object);
-        webResponse = new Mock<HttpWebResponse>();
-
-        serviceCollection = new ServiceCollection();
-        var serviceProvider = serviceCollection.BuildServiceProvider();
-
-        context.SetupProperty(c => c.InstanceServices, serviceProvider);
-
-        participant = new Participant()
+        _participantCsvRecord = new ParticipantCsvRecord
         {
-            FirstName = "Joe",
-            Surname = "Bloggs",
-            NHSId = "1",
-            RecordType = Actions.New
+            FileName = "test.csv",
+            Participant = new Participant()
+            {
+                FirstName = "Joe",
+                Surname = "Bloggs",
+                NHSId = "1",
+                RecordType = Actions.New
+            }
         };
     }
 
     [TestMethod]
     public async Task Run_Should_log_Participant_Created()
     {
-        webResponse.Setup(x => x.StatusCode).Returns(HttpStatusCode.Created);
-        var json = JsonSerializer.Serialize(participant);
+        // Arrange
+        _webResponse.Setup(x => x.StatusCode).Returns(HttpStatusCode.Created);
+        var json = JsonSerializer.Serialize(_participantCsvRecord);
 
-        callFunctionMock.Setup(call => call.SendPost(It.Is<string>(s => s.Contains("DSaddParticipant")), It.IsAny<string>()))
-                        .Returns(Task.FromResult<HttpWebResponse>(webResponse.Object));
+        _callFunctionMock.Setup(call => call.SendPost(It.Is<string>(s => s.Contains("DSaddParticipant")), It.IsAny<string>()))
+                        .Returns(Task.FromResult<HttpWebResponse>(_webResponse.Object));
 
-        SetupRequest(json);
-        var sut = new AddParticipantFunction(loggerMock.Object, callFunctionMock.Object, createResponse.Object);
+        _checkDemographic.Setup(x => x.GetDemographicAsync(It.IsAny<string>(), It.Is<string>(s => s.Contains("DemographicURIGet"))))
+            .Returns(Task.FromResult<Demographic>(new Demographic()));
 
-        var result = await sut.Run(request.Object);
+        _request = _setupRequest.Setup(json);
+        var sut = new AddParticipantFunction(_loggerMock.Object, _callFunctionMock.Object, _createResponse.Object, _checkDemographic.Object, _createParticipant.Object);
 
-        loggerMock.Verify(log =>
+        // Act
+        var result = await sut.Run(_request.Object);
+
+        // Assert
+        _loggerMock.Verify(log =>
             log.Log(
             LogLevel.Information,
             0,
@@ -75,19 +75,24 @@ public class AddNewParticipantTestClass
     [TestMethod]
     public async Task Run_Should_Log_Participant_Marked_As_Eligible()
     {
+        // Arrange
+        _webResponse.Setup(x => x.StatusCode).Returns(HttpStatusCode.Created);
+        var json = JsonSerializer.Serialize(_participantCsvRecord);
 
-        webResponse.Setup(x => x.StatusCode).Returns(HttpStatusCode.Created);
-        var json = JsonSerializer.Serialize(participant);
+        _callFunctionMock.Setup(call => call.SendPost(It.Is<string>(s => s.Contains("DSmarkParticipantAsEligible")), It.IsAny<string>()))
+                        .Returns(Task.FromResult<HttpWebResponse>(_webResponse.Object));
 
-        callFunctionMock.Setup(call => call.SendPost(It.Is<string>(s => s.Contains("DSmarkParticipantAsEligible")), It.IsAny<string>()))
-                        .Returns(Task.FromResult<HttpWebResponse>(webResponse.Object));
+        _checkDemographic.Setup(x => x.GetDemographicAsync(It.IsAny<string>(), It.Is<string>(s => s.Contains("DemographicURIGet"))))
+                        .Returns(Task.FromResult<Demographic>(new Demographic()));
 
-        SetupRequest(json);
-        var sut = new AddParticipantFunction(loggerMock.Object, callFunctionMock.Object, createResponse.Object);
+        _request = _setupRequest.Setup(json);
+        var sut = new AddParticipantFunction(_loggerMock.Object, _callFunctionMock.Object, _createResponse.Object, _checkDemographic.Object, _createParticipant.Object);
 
-        var result = await sut.Run(request.Object);
+        // Act
+        var result = await sut.Run(_request.Object);
 
-        loggerMock.Verify(log =>
+        // Assert
+        _loggerMock.Verify(log =>
             log.Log(
             LogLevel.Information,
             0,
@@ -100,18 +105,23 @@ public class AddNewParticipantTestClass
     [TestMethod]
     public async Task Run_Should_Log_Participant_Log_Error()
     {
+        // Arrange
+        _webResponse.Setup(x => x.StatusCode).Returns(HttpStatusCode.Created);
+        var json = JsonSerializer.Serialize(_participantCsvRecord);
 
-        webResponse.Setup(x => x.StatusCode).Returns(HttpStatusCode.Created);
-        var json = JsonSerializer.Serialize(participant);
+        _callFunctionMock.Setup(call => call.SendPost(It.Is<string>(s => s.Contains("DSmarkParticipantAsEligible")), It.IsAny<string>()));
 
-        callFunctionMock.Setup(call => call.SendPost(It.Is<string>(s => s.Contains("DSmarkParticipantAsEligible")), It.IsAny<string>()));
+        _checkDemographic.Setup(x => x.GetDemographicAsync(It.IsAny<string>(), It.Is<string>(s => s.Contains("DemographicURIGet"))))
+            .Returns(Task.FromResult<Demographic>(new Demographic()));
 
-        SetupRequest(json);
-        var sut = new AddParticipantFunction(loggerMock.Object, callFunctionMock.Object, createResponse.Object);
+        _request = _setupRequest.Setup(json);
+        var sut = new AddParticipantFunction(_loggerMock.Object, _callFunctionMock.Object, _createResponse.Object, _checkDemographic.Object, _createParticipant.Object);
 
-        var result = await sut.Run(request.Object);
+        // Act
+        var result = await sut.Run(_request.Object);
 
-        loggerMock.Verify(log =>
+        // Assert
+        _loggerMock.Verify(log =>
             log.Log(
             LogLevel.Information,
             0,
@@ -124,18 +134,23 @@ public class AddNewParticipantTestClass
     [TestMethod]
     public async Task Run_Should_Marked_As_Eligible_Log_Error()
     {
+        // Arrange
+        _webResponse.Setup(x => x.StatusCode).Returns(HttpStatusCode.Created);
+        var json = JsonSerializer.Serialize(_participantCsvRecord);
 
-        webResponse.Setup(x => x.StatusCode).Returns(HttpStatusCode.Created);
-        var json = JsonSerializer.Serialize(participant);
+        _callFunctionMock.Setup(call => call.SendPost(It.Is<string>(s => s.Contains("DSaddParticipant")), It.IsAny<string>()));
 
-        callFunctionMock.Setup(call => call.SendPost(It.Is<string>(s => s.Contains("DSaddParticipant")), It.IsAny<string>()));
+        _checkDemographic.Setup(x => x.GetDemographicAsync(It.IsAny<string>(), It.Is<string>(s => s.Contains("DemographicURIGet"))))
+            .Returns(Task.FromResult<Demographic>(new Demographic()));
 
-        SetupRequest(json);
-        var sut = new AddParticipantFunction(loggerMock.Object, callFunctionMock.Object, createResponse.Object);
+        _request = _setupRequest.Setup(json);
+        var sut = new AddParticipantFunction(_loggerMock.Object, _callFunctionMock.Object, _createResponse.Object, _checkDemographic.Object, _createParticipant.Object);
 
-        var result = await sut.Run(request.Object);
+        // Act
+        var result = await sut.Run(_request.Object);
 
-        loggerMock.Verify(log =>
+        // Assert
+        _loggerMock.Verify(log =>
             log.Log(
             LogLevel.Information,
             0,
@@ -143,22 +158,5 @@ public class AddNewParticipantTestClass
             null,
             (Func<object, Exception, string>)It.IsAny<object>()
             ));
-    }
-
-    private void SetupRequest(string json)
-    {
-        var byteArray = Encoding.ASCII.GetBytes(json);
-        var bodyStream = new MemoryStream(byteArray);
-
-        request.Setup(r => r.Body).Returns(bodyStream);
-        request.Setup(r => r.CreateResponse()).Returns(() =>
-        {
-            var response = new Mock<HttpResponseData>(context.Object);
-            response.SetupProperty(r => r.Headers, new HttpHeadersCollection());
-            response.SetupProperty(r => r.StatusCode);
-            response.SetupProperty(r => r.Body, new MemoryStream());
-            return response.Object;
-        });
-
     }
 }

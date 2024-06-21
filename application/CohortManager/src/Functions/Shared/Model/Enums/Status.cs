@@ -1,8 +1,7 @@
-﻿namespace Model.Enums
+namespace Model.Enums;
+
+public enum Status
 {
-    public enum Status
-    {
-        Formal = 1,
-        Informal = 2
-    }
+    Formal = 1,
+    Informal = 2
 }

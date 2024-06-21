@@ -3,7 +3,6 @@ using System.Data.Common;
 using Common;
 using Data.Database;
 using Microsoft.Data.SqlClient;
-using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -21,6 +20,7 @@ var host = new HostBuilder()
         services.AddSingleton<ICreateResponse, CreateResponse>();
         services.AddSingleton<IUpdateParticipantData, UpdateParticipantData>();
         services.AddSingleton<IDatabaseHelper, DatabaseHelper>();
+        services.AddSingleton<ICallFunction, CallFunction>();
     })
     .Build();
 

@@ -13,14 +13,17 @@ namespace addParticipant
     {
         private readonly ILogger<AddParticipantFunction> _logger;
         private readonly ICallFunction _callFunction;
-
         private readonly ICreateResponse _createResponse;
+        private readonly ICheckDemographic _getDemographicData;
+        private readonly ICreateParticipant _createParticipant;
 
-        public AddParticipantFunction(ILogger<AddParticipantFunction> logger, ICallFunction callFunction, ICreateResponse createResponse)
+        public AddParticipantFunction(ILogger<AddParticipantFunction> logger, ICallFunction callFunction, ICreateResponse createResponse, ICheckDemographic checkDemographic, ICreateParticipant createParticipant)
         {
             _logger = logger;
             _callFunction = callFunction;
             _createResponse = createResponse;
+            _getDemographicData = checkDemographic;
+            _createParticipant = createParticipant;
         }
 
         [Function("addParticipant")]
@@ -29,37 +32,48 @@ namespace addParticipant
             _logger.LogInformation("C# addParticipant called.");
             HttpWebResponse createResponse, eligibleResponse;
 
-            // convert body to json and then deserialize to object
-            string postdata = "";
+            string postData = "";
+            Participant participant = new Participant();
             using (StreamReader reader = new StreamReader(req.Body, Encoding.UTF8))
             {
-                postdata = reader.ReadToEnd();
+                postData = reader.ReadToEnd();
             }
-            Participant input = JsonSerializer.Deserialize<Participant>(postdata);
+            var basicParticipantCsvRecord = JsonSerializer.Deserialize<BasicParticipantCsvRecord>(postData);
 
-            // Any validation or decisions go in here
-
-            // call data service create Participant
             try
             {
-                var json = JsonSerializer.Serialize(input);
+                var demographicData = await _getDemographicData.GetDemographicAsync(basicParticipantCsvRecord.Participant.NHSId, Environment.GetEnvironmentVariable("DemographicURIGet"));
+                if (demographicData == null)
+                {
+                    _logger.LogInformation("demographic function failed");
+                    return _createResponse.CreateHttpResponse(HttpStatusCode.InternalServerError, req);
+                }
+
+                participant = _createParticipant.CreateResponseParticipantModel(basicParticipantCsvRecord.Participant, demographicData);
+                var participantCsvRecord = new ParticipantCsvRecord
+                {
+                    Participant = participant,
+                    FileName = basicParticipantCsvRecord.FileName,
+                };
+                var json = JsonSerializer.Serialize(participantCsvRecord);
+
                 createResponse = await _callFunction.SendPost(Environment.GetEnvironmentVariable("DSaddParticipant"), json);
 
                 if (createResponse.StatusCode == HttpStatusCode.Created)
                 {
                     _logger.LogInformation("participant created");
-                    _createResponse.CreateHttpResponse(HttpStatusCode.Created, req);
+                    return _createResponse.CreateHttpResponse(HttpStatusCode.Created, req);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogInformation($"Unable to call function.\nMessage:{ex.Message}\nStack Trace: {ex.StackTrace}");
+                _logger.LogInformation($"Unable to call function.\nMessage: {ex.Message}\nStack Trace: {ex.StackTrace}");
             }
 
             // call data service mark as eligible
             try
             {
-                var json = JsonSerializer.Serialize(input);
+                var json = JsonSerializer.Serialize(participant);
                 eligibleResponse = await _callFunction.SendPost(Environment.GetEnvironmentVariable("DSmarkParticipantAsEligible"), json);
 
                 if (eligibleResponse.StatusCode == HttpStatusCode.Created)
@@ -70,7 +84,7 @@ namespace addParticipant
             }
             catch (Exception ex)
             {
-                _logger.LogInformation($"Unable to call function.\nMessage:{ex.Message}\nStack Trace: {ex.StackTrace}");
+                _logger.LogInformation($"Unable to call function.\nMessage: {ex.Message}\nStack Trace: {ex.StackTrace}");
             }
 
             return _createResponse.CreateHttpResponse(HttpStatusCode.OK, req);

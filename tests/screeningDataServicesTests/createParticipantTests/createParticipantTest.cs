@@ -1,43 +1,25 @@
-namespace screeningDataServices;
+namespace NHS.CohortManager.Tests.ScreeningDataServicesTests;
 
 using System.Net;
-using System.Text;
 using System.Threading.Tasks;
-
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
-
 using Moq;
 using Common;
 using Data.Database;
 using Model;
 using Model.Enums;
+using screeningDataServices;
 
 [TestClass]
 public class CreateParticipantTests
 {
-
-    private Mock<ILogger<CreateParticipant>> mockLogger;
-    private Mock<ICreateResponse> mockCreateResponse;
-    private Mock<ICreateParticipantData> mockCreateParticipantData;
-    private Mock<Participant> mockParticipantDetails;
-
-    Mock<FunctionContext> mockContext;
-    Mock<HttpRequestData> mockRequest;
-
-    [TestInitialize]
-    public void Setup()
-    {
-        // Arrange
-        var encoding = Encoding.UTF8;
-
-        mockLogger = new Mock<ILogger<CreateParticipant>>();
-        mockCreateResponse = new Mock<ICreateResponse>();
-        mockCreateParticipantData = new Mock<ICreateParticipantData>();
-        mockParticipantDetails = GenerateMockModelParticipantDetails();
-        mockContext = new Mock<FunctionContext>();
-    }
+    private readonly Mock<ILogger<screeningDataServices.CreateParticipant>> _mockLogger = new();
+    private readonly Mock<ICreateResponse> _mockCreateResponse = new();
+    private readonly Mock<ICreateParticipantData> _mockCreateParticipantData = new();
+    private readonly Mock<FunctionContext> _mockContext = new();
+    private Mock<HttpRequestData> _mockRequest;
 
     [TestMethod]
     public async Task Run_ValidRequest_ReturnsSuccess()
@@ -49,31 +31,31 @@ public class CreateParticipantTests
             }";
         var mockRequest = MockHelpers.CreateMockHttpRequestData(requestBody);
 
-        var createParticipant = new CreateParticipant(mockLogger.Object, mockCreateResponse.Object, mockCreateParticipantData.Object);
-        mockCreateParticipantData.Setup(data => data.CreateParticipantEntryAsync(It.IsAny<Participant>(), It.IsAny<string>())).Returns(true);
+        var sut = new screeningDataServices.CreateParticipant(_mockLogger.Object, _mockCreateResponse.Object, _mockCreateParticipantData.Object);
+        _mockCreateParticipantData.Setup(data => data.CreateParticipantEntry(It.IsAny<ParticipantCsvRecord>())).Returns(true);
 
         // Act
-        var response = await createParticipant.Run(mockRequest);
+        var response = await sut.Run(mockRequest);
 
         // Assert
-        mockCreateResponse.Verify(response => response.CreateHttpResponse(HttpStatusCode.OK, It.IsAny<HttpRequestData>(), ""), Times.Once);
-        mockCreateResponse.VerifyNoOtherCalls();
+        _mockCreateResponse.Verify(response => response.CreateHttpResponse(HttpStatusCode.OK, It.IsAny<HttpRequestData>(), ""), Times.Once);
+        _mockCreateResponse.VerifyNoOtherCalls();
     }
 
     [TestMethod]
     public async Task Run_InvalidRequest_Returns404()
     {
         // Arrange
-        mockRequest = new Mock<HttpRequestData>(mockContext.Object);
-        var createParticipant = new CreateParticipant(mockLogger.Object, mockCreateResponse.Object, mockCreateParticipantData.Object);
-        mockCreateParticipantData.Setup(data => data.CreateParticipantEntryAsync(It.IsAny<Participant>(), It.IsAny<string>())).Returns(false);
+        _mockRequest = new Mock<HttpRequestData>(_mockContext.Object);
+        var sut = new screeningDataServices.CreateParticipant(_mockLogger.Object, _mockCreateResponse.Object, _mockCreateParticipantData.Object);
+        _mockCreateParticipantData.Setup(data => data.CreateParticipantEntry(It.IsAny<ParticipantCsvRecord>())).Returns(false);
 
         // Act
-        var response = await createParticipant.Run(mockRequest.Object);
+        var response = await sut.Run(_mockRequest.Object);
 
         // Assert
-        mockCreateResponse.Verify(response => response.CreateHttpResponse(HttpStatusCode.InternalServerError, It.IsAny<HttpRequestData>(), ""), Times.Once);
-        mockCreateResponse.VerifyNoOtherCalls();
+        _mockCreateResponse.Verify(response => response.CreateHttpResponse(HttpStatusCode.InternalServerError, It.IsAny<HttpRequestData>(), ""), Times.Once);
+        _mockCreateResponse.VerifyNoOtherCalls();
     }
 
     private Mock<Participant> GenerateMockModelParticipantDetails()
@@ -103,7 +85,7 @@ public class CreateParticipantTests
         participantMock.Object.MobileNumber = "";
         participantMock.Object.EmailAddress = "";
         participantMock.Object.PreferredLanguage = "";
-        participantMock.Object.IsInterpreterRequired = "";
+        participantMock.Object.IsInterpreterRequired = "0";
         participantMock.Object.RecordType = "";
 
         return participantMock;

@@ -1,207 +1,242 @@
-namespace processCaasFileTest;
+namespace NHS.CohortManager.Tests.CaasIntegrationTests;
 
 using Moq;
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using processCaasFile;
 using Microsoft.Azure.Functions.Worker.Http;
-using Microsoft.Azure.Functions.Worker;
-using Microsoft.Extensions.DependencyInjection;
 using Common;
 using Model;
+using NHS.CohortManager.Tests.TestUtils;
+using NHS.CohortManager.CaasIntegrationService;
 
 [TestClass]
-public class processCaasFileTests
+public class ProcessCaasFileTests
 {
-    private readonly Mock<ILogger<ProcessCaasFileFunction>> loggerMock = new();
-    private readonly Mock<ICallFunction> callFunctionMock = new();
-    private readonly ServiceCollection serviceCollection = new();
-    private readonly Mock<FunctionContext> context = new();
-    private readonly Mock<HttpRequestData> request;
-    private readonly Mock<ICreateResponse> createResponse = new();
+    private readonly Mock<ILogger<ProcessCaasFileFunction>> _logger = new();
+    private readonly Mock<ICallFunction> _callFunction = new();
+    private Mock<HttpRequestData> _request;
+    private readonly Mock<ICreateResponse> _createResponse = new();
+    private readonly Mock<ICheckDemographic> _checkDemographic = new();
+    private readonly SetupRequest _setupRequest = new();
+    private readonly Mock<ICreateBasicParticipantData> _createBasicParticipantData = new();
 
-    public processCaasFileTests()
+    public ProcessCaasFileTests()
     {
         Environment.SetEnvironmentVariable("PMSAddParticipant", "PMSAddParticipant");
         Environment.SetEnvironmentVariable("PMSRemoveParticipant", "PMSRemoveParticipant");
         Environment.SetEnvironmentVariable("PMSUpdateParticipant", "PMSUpdateParticipant");
-
-        request = new Mock<HttpRequestData>(context.Object);
-
-        var serviceProvider = serviceCollection.BuildServiceProvider();
-
-        context.SetupProperty(c => c.InstanceServices, serviceProvider);
+        Environment.SetEnvironmentVariable("StaticValidationURL", "StaticValidationURL");
     }
 
     [TestMethod]
-    public async Task Run_Should_Log_RecordsReceived_And_Call_AddParticipant()
+    public async Task Run_Should_Call_AddParticipant_For_Each_New_Participant()
     {
-        //Arrange
+        // Arrange
         var cohort = new Cohort
         {
             Participants = new List<Participant>
-                {
-                    new Participant { RecordType = Actions.New },
-                    new Participant { RecordType = Actions.New }
-                }
+            {
+                new() { RecordType = Actions.New },
+                new() { RecordType = Actions.New },
+            }
         };
         var json = JsonSerializer.Serialize(cohort);
+        _request = _setupRequest.Setup(json);
 
-        setupRequest(json);
-        var sut = new ProcessCaasFileFunction(loggerMock.Object, callFunctionMock.Object, createResponse.Object);
+        var sut = new ProcessCaasFileFunction(_logger.Object, _callFunction.Object, _createResponse.Object, _checkDemographic.Object, _createBasicParticipantData.Object);
 
-        //Act
-        var result = await sut.Run(request.Object);
+        // Act
+        var result = await sut.Run(_request.Object);
 
-        //Assert
-        callFunctionMock.Verify(
+        // Assert
+        _callFunction.Verify(
             x => x.SendPost(It.Is<string>(s => s.Contains("PMSAddParticipant")), It.IsAny<string>()),
             Times.Exactly(2));
+        _callFunction.VerifyNoOtherCalls();
     }
 
     [TestMethod]
-    public async Task Run_Should_Log_RecordsReceived_And_Call_UpdateParticipant()
+    public async Task Run_Should_Call_UpdateParticipant_For_Each_Amended_Participant()
     {
-        //Arrange
+        // Arrange
         var cohort = new Cohort
         {
             Participants = new List<Participant>
-                {
-                    new Participant { RecordType = Actions.Amended },
-                    new Participant { RecordType = Actions.Amended }
-                }
+            {
+                new() { RecordType = Actions.Amended },
+                new() { RecordType = Actions.Amended }
+            }
         };
         var json = JsonSerializer.Serialize(cohort);
-        var sut = new ProcessCaasFileFunction(loggerMock.Object, callFunctionMock.Object, createResponse.Object);
+        _request = _setupRequest.Setup(json);
 
-        setupRequest(json);
+        var sut = new ProcessCaasFileFunction(_logger.Object, _callFunction.Object, _createResponse.Object, _checkDemographic.Object, _createBasicParticipantData.Object);
 
-        //Act
-        var result = await sut.Run(request.Object);
+        // Act
+        var result = await sut.Run(_request.Object);
 
-        //Assert
-        callFunctionMock.Verify(
+        // Assert
+        _callFunction.Verify(
             x => x.SendPost(It.Is<string>(s => s.Contains("PMSUpdateParticipant")), It.IsAny<string>()),
             Times.Exactly(2));
+        _callFunction.VerifyNoOtherCalls();
     }
 
     [TestMethod]
-    public async Task Run_Should_Log_RecordsReceived_And_UpdateParticipant_throwsException()
+    public async Task Run_Should_Call_RemoveParticipant_For_Each_Removed_Participant()
     {
-        //Arrange
+        // Arrange
         var cohort = new Cohort
         {
             Participants = new List<Participant>
-                {
-                    new() { RecordType = Actions.Amended }
-                }
+            {
+                new() { RecordType = Actions.Removed },
+                new() { RecordType = Actions.Removed }
+            }
         };
-        var exception = new Exception("Unable to call function");
         var json = JsonSerializer.Serialize(cohort);
-        setupRequest(json);
 
+        _request = _setupRequest.Setup(json);
 
-        callFunctionMock.Setup(call => call.SendPost(It.Is<string>(s => s.Contains("PMSUpdateParticipant")), It.IsAny<string>()))
-            .ThrowsAsync(exception);
-
-        var sut = new ProcessCaasFileFunction(loggerMock.Object, callFunctionMock.Object, createResponse.Object);
+        var sut = new ProcessCaasFileFunction(_logger.Object, _callFunction.Object, _createResponse.Object, _checkDemographic.Object, _createBasicParticipantData.Object);
 
         // Act
-        await sut.Run(request.Object);
+        var result = await sut.Run(_request.Object);
 
         // Assert
-        loggerMock.Verify(log =>
-            log.Log(
-            LogLevel.Information,
-            0,
-            It.Is<It.IsAnyType>((state, type) => state.ToString().Contains("Unable to call function")),
-            null,
-            (Func<object, Exception, string>)It.IsAny<object>()
-            ));
-    }
-
-    [TestMethod]
-    public async Task Run_Should_Log_RecordsReceived_And_Call_DelParticipant()
-    {
-        //Arrange
-        var cohort = new Cohort
-        {
-            Participants = new List<Participant>
-                {
-                    new Participant { RecordType = Actions.Removed },
-                    new Participant { RecordType = Actions.Removed }
-                }
-        };
-        var json = JsonSerializer.Serialize(cohort);
-        var sut = new ProcessCaasFileFunction(loggerMock.Object, callFunctionMock.Object, createResponse.Object);
-
-        setupRequest(json);
-
-        //Act
-        var result = await sut.Run(request.Object);
-
-        //Assert
-        callFunctionMock.Verify(
+        _callFunction.Verify(
             x => x.SendPost(It.Is<string>(s => s.Contains("PMSRemoveParticipant")), It.IsAny<string>()),
             Times.Exactly(2));
+        _callFunction.VerifyNoOtherCalls();
     }
 
     [TestMethod]
-    public async Task Run_Should_Log_RecordsReceived_And_DelParticipant_throwsException()
+    public async Task Run_Should_Call_StaticValidation_For_Each_Unknown_Participant_RecordType()
     {
-        //Arrange
+        // Arrange
         var cohort = new Cohort
         {
             Participants = new List<Participant>
-                {
-                    new Participant { RecordType = Actions.Removed }
-                }
+            {
+                new() { RecordType = null },
+                new() { RecordType = "Unknown" }
+            }
         };
-        var exception = new Exception("Unable to call function");
         var json = JsonSerializer.Serialize(cohort);
-        setupRequest(json);
 
+        _request = _setupRequest.Setup(json);
 
-        callFunctionMock.Setup(call => call.SendPost(It.Is<string>(s => s.Contains("PMSRemoveParticipant")), It.IsAny<string>()))
-            .ThrowsAsync(exception);
-
-        var sut = new ProcessCaasFileFunction(loggerMock.Object, callFunctionMock.Object, createResponse.Object);
+        var sut = new ProcessCaasFileFunction(_logger.Object, _callFunction.Object, _createResponse.Object, _checkDemographic.Object, _createBasicParticipantData.Object);
 
         // Act
-        await sut.Run(request.Object);
+        var result = await sut.Run(_request.Object);
 
         // Assert
-        loggerMock.Verify(log =>
+        _callFunction.Verify(
+            x => x.SendPost(It.Is<string>(s => s.Contains("StaticValidationURL")), It.IsAny<string>()),
+            Times.Exactly(2));
+        _callFunction.VerifyNoOtherCalls();
+    }
+
+    [TestMethod]
+    public async Task Run_Should_Log_Error_When_AddParticipant_Fails()
+    {
+        // Arrange
+        var cohort = new Cohort
+        {
+            Participants = new List<Participant>
+            {
+                new() { RecordType = Actions.New }
+            }
+        };
+        var json = JsonSerializer.Serialize(cohort);
+        _request = _setupRequest.Setup(json);
+
+        _callFunction.Setup(call => call.SendPost(It.Is<string>(s => s.Contains("PMSAddParticipant")), It.IsAny<string>()))
+            .ThrowsAsync(new Exception());
+
+        var sut = new ProcessCaasFileFunction(_logger.Object, _callFunction.Object, _createResponse.Object, _checkDemographic.Object, _createBasicParticipantData.Object);
+
+        // Act
+        await sut.Run(_request.Object);
+
+        // Assert
+        _logger.Verify(log =>
             log.Log(
-            LogLevel.Information,
+            LogLevel.Error,
             0,
-            It.Is<It.IsAnyType>((state, type) => state.ToString().Contains("Unable to call function")),
+            It.Is<It.IsAnyType>((state, type) => state.ToString().Contains("Add participant function failed.")),
             null,
             (Func<object, Exception, string>)It.IsAny<object>()
-            ));
+            ), Times.Once);
     }
 
-    private void setupRequest(string json)
+    [TestMethod]
+    public async Task Run_Should_Log_Error_When_UpdateParticipant_Fails()
     {
-        var byteArray = Encoding.ASCII.GetBytes(json);
-        var bodyStream = new MemoryStream(byteArray);
-
-        request.Setup(r => r.Body).Returns(bodyStream);
-        request.Setup(r => r.CreateResponse()).Returns(() =>
+        // Arrange
+        var cohort = new Cohort
         {
-            var response = new Mock<HttpResponseData>(context.Object);
-            response.SetupProperty(r => r.Headers, new HttpHeadersCollection());
-            response.SetupProperty(r => r.StatusCode);
-            response.SetupProperty(r => r.Body, new MemoryStream());
-            return response.Object;
-        });
+            Participants = new List<Participant>
+            {
+                new() { RecordType = Actions.Amended }
+            }
+        };
+        var json = JsonSerializer.Serialize(cohort);
+        _request = _setupRequest.Setup(json);
 
+        _callFunction.Setup(call => call.SendPost(It.Is<string>(s => s.Contains("PMSUpdateParticipant")), It.IsAny<string>()))
+            .ThrowsAsync(new Exception());
+
+        var sut = new ProcessCaasFileFunction(_logger.Object, _callFunction.Object, _createResponse.Object, _checkDemographic.Object, _createBasicParticipantData.Object);
+
+        // Act
+        await sut.Run(_request.Object);
+
+        // Assert
+        _logger.Verify(log =>
+            log.Log(
+            LogLevel.Error,
+            0,
+            It.Is<It.IsAnyType>((state, type) => state.ToString().Contains("Update participant function failed.")),
+            null,
+            (Func<object, Exception, string>)It.IsAny<object>()
+            ), Times.Once);
     }
 
+    [TestMethod]
+    public async Task Run_Should_Log_Error_When_RemoveParticipant_Fails()
+    {
+        // Arrange
+        var cohort = new Cohort
+        {
+            Participants = new List<Participant>
+            {
+                new() { RecordType = Actions.Removed }
+            }
+        };
+        var json = JsonSerializer.Serialize(cohort);
+        _request = _setupRequest.Setup(json);
 
+        _callFunction.Setup(call => call.SendPost(It.Is<string>(s => s.Contains("PMSRemoveParticipant")), It.IsAny<string>()))
+            .ThrowsAsync(new Exception());
+
+        var sut = new ProcessCaasFileFunction(_logger.Object, _callFunction.Object, _createResponse.Object, _checkDemographic.Object, _createBasicParticipantData.Object);
+
+        // Act
+        await sut.Run(_request.Object);
+
+        // Assert
+        _logger.Verify(log =>
+            log.Log(
+            LogLevel.Error,
+            0,
+            It.Is<It.IsAnyType>((state, type) => state.ToString().Contains("Remove participant function failed.")),
+            null,
+            (Func<object, Exception, string>)It.IsAny<object>()
+            ), Times.Once);
+    }
 }

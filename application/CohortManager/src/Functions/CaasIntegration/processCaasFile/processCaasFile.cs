@@ -1,3 +1,5 @@
+namespace NHS.CohortManager.CaasIntegrationService;
+
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -7,126 +9,116 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 
-namespace processCaasFile
+public class ProcessCaasFileFunction
 {
-    public class ProcessCaasFileFunction
+    private readonly ILogger<ProcessCaasFileFunction> _logger;
+    private readonly ICallFunction _callFunction;
+    private readonly ICreateResponse _createResponse;
+    private readonly ICheckDemographic _checkDemographic;
+    private readonly ICreateBasicParticipantData _createBasicParticipantData;
+
+    public ProcessCaasFileFunction(ILogger<ProcessCaasFileFunction> logger, ICallFunction callFunction, ICreateResponse createResponse, ICheckDemographic checkDemographic, ICreateBasicParticipantData createBasicParticipantData)
     {
-        private readonly ILogger<ProcessCaasFileFunction> _logger;
-        private readonly ICallFunction _callFunction;
-        private readonly ICreateResponse _createResponse;
+        _logger = logger;
+        _callFunction = callFunction;
+        _createResponse = createResponse;
+        _checkDemographic = checkDemographic;
+        _createBasicParticipantData = createBasicParticipantData;
+    }
 
-        public ProcessCaasFileFunction(ILogger<ProcessCaasFileFunction> logger, ICallFunction callFunction, ICreateResponse createResponse)
+    [Function("processCaasFile")]
+    public async Task<HttpResponseData> Run([HttpTrigger(AuthorizationLevel.Anonymous, "post")] HttpRequestData req)
+    {
+        string postData = "";
+        using (StreamReader reader = new StreamReader(req.Body, Encoding.UTF8))
         {
-            _logger = logger;
-            _callFunction = callFunction;
-            _createResponse = createResponse;
+            postData = reader.ReadToEnd();
+        }
+        Cohort input = JsonSerializer.Deserialize<Cohort>(postData);
+
+        _logger.LogInformation("Records received: {Count}", input.Participants.Count);
+
+        int add = 0, upd = 0, del = 0, err = 0, row = 0;
+
+        foreach (var participant in input.Participants)
+        {
+            row++;
+            var demographicDataInserted = await _checkDemographic.PostDemographicDataAsync(participant, Environment.GetEnvironmentVariable("DemographicURI"));
+            if (demographicDataInserted == false)
+            {
+                _logger.LogError("Demographic function failed");
+            }
+
+            var basicParticipantCsvRecord = new BasicParticipantCsvRecord
+            {
+                Participant = _createBasicParticipantData.BasicParticipantData(participant),
+                FileName = input.FileName
+            };
+
+            switch (participant.RecordType?.Trim())
+            {
+                case Actions.New:
+                    add++;
+                    try
+                    {
+                        var json = JsonSerializer.Serialize(basicParticipantCsvRecord);
+                        await _callFunction.SendPost(Environment.GetEnvironmentVariable("PMSAddParticipant"), json);
+                        _logger.LogInformation("Called add participant");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError("Add participant function failed.\nMessage: {Message}\nStack Trace: {StackTrace}", ex.Message, ex.StackTrace);
+                    }
+                    break;
+                case Actions.Amended:
+                    upd++;
+                    try
+                    {
+                        var json = JsonSerializer.Serialize(basicParticipantCsvRecord);
+                        await _callFunction.SendPost(Environment.GetEnvironmentVariable("PMSUpdateParticipant"), json);
+                        _logger.LogInformation("Called update participant");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError("Update participant function failed.\nMessage: {Message}\nStack Trace: {StackTrace}", ex.Message, ex.StackTrace);
+                    }
+                    break;
+                case Actions.Removed:
+                    del++;
+                    try
+                    {
+                        var json = JsonSerializer.Serialize(basicParticipantCsvRecord);
+                        await _callFunction.SendPost(Environment.GetEnvironmentVariable("PMSRemoveParticipant"), json);
+                        _logger.LogInformation("Called remove participant");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError("Remove participant function failed.\nMessage: {Message}\nStack Trace: {StackTrace}", ex.Message, ex.StackTrace);
+                    }
+                    break;
+                default:
+                    err++;
+                    try
+                    {
+                        var json = JsonSerializer.Serialize(participant);
+                        await _callFunction.SendPost(Environment.GetEnvironmentVariable("StaticValidationURL"), json);
+                        _logger.LogInformation("Called static validation");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError("Static validation function failed.\nMessage: {Message}\nStack Trace: {StackTrace}", ex.Message, ex.StackTrace);
+                    }
+                    break;
+            }
         }
 
-        [Function("processCaasFile")]
-        public async Task<HttpResponseData> Run([HttpTrigger(AuthorizationLevel.Anonymous, "post")] HttpRequestData req)
+        _logger.LogInformation("There are {add} Additions. There are {upd} Updates. There are {del} Deletions. There are {err} Errors.", add, upd, del, err);
+
+        if (err > 0)
         {
-
-            string postdata = "";
-            using (StreamReader reader = new StreamReader(req.Body, Encoding.UTF8))
-            {
-                postdata = reader.ReadToEnd();
-            }
-            Cohort input = JsonSerializer.Deserialize<Cohort>(postdata);
-
-            // debug info
-            _logger.LogInformation("Records received: \n" + input.Participants.Count);
-
-            _logger.LogInformation($"Records received {input.Participants.Count}");
-            int add = 0, upd = 0, del = 0, err = 0, row = 0;
-
-            foreach (Participant p in input.Participants)
-            {
-                row++;
-                switch (p.RecordType.Trim())
-                {
-                    case Actions.New:
-                        add++;
-                        try
-                        {
-                            var json = JsonSerializer.Serialize(p);
-                            var addresp = await _callFunction.SendPost(Environment.GetEnvironmentVariable("PMSAddParticipant"), json);
-                            _logger.LogInformation("Called add participant");
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError($"Unable to call function.\nMessage:{ex.Message}\nStack Trace: {ex.StackTrace}");
-                        }
-                        break;
-                    case Actions.Amended:
-                        upd++;
-                        try
-                        {
-                            var json = JsonSerializer.Serialize(p);
-                            var addresp = await _callFunction.SendPost(Environment.GetEnvironmentVariable("PMSUpdateParticipant"), json);
-                            _logger.LogInformation("Called update participant");
-
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogInformation($"Unable to call function.\nMessage:{ex.Message}\nStack Trace: {ex.StackTrace}");
-                        }
-                        break;
-                    case Actions.Removed:
-                        del++;
-                        try
-                        {
-                            var json = JsonSerializer.Serialize(p);
-                            var addresp = await _callFunction.SendPost(Environment.GetEnvironmentVariable("PMSRemoveParticipant"), json);
-                            _logger.LogInformation("Called remove participant");
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogInformation($"Unable to call function.\nMessage:{ex.Message}\nStack Trace: {ex.StackTrace}");
-                        }
-                        break;
-                    default:
-                        err++;
-                        //_logger.LogInformation($"error row:{row} action :{p.action}");
-                        break;
-                }
-            }
-
-            _logger.LogInformation($"There are {add} Additions. There are {upd} Updates. There are {del} Deletions. There are {err} Errors.");
-
-
-            //send to eventgrid
-            /*
-            EventGridPublisherClient client = new EventGridPublisherClient(
-            new Uri(),
-            new AzureKeyCredential());
-
-            // Add EventGridEvents to a list to publish to the topic
-            EventGridEvent egEvent =
-                new EventGridEvent(
-                    "ExampleEventSubject",
-                    "Example.EventType",
-                    "1.0",
-                    "Hello world!");
-
-            try
-            {
-                // Send the event
-                client.SendEvent(egEvent);
-                _logger.LogInformation("test event sent.");
-            }
-            catch(Exception ex)
-            {
-                _logger.LogInformation($"Unable to send event.\nMessage:{ex.Message}\nStack Trace: {ex.StackTrace}");
-            }
-            */
-
-            // set response headers and return
-
-            if (err > 0)
-            {
-                return _createResponse.CreateHttpResponse(HttpStatusCode.InternalServerError, req);
-            }
-            return _createResponse.CreateHttpResponse(HttpStatusCode.OK, req);
+            return _createResponse.CreateHttpResponse(HttpStatusCode.InternalServerError, req);
         }
+
+        return _createResponse.CreateHttpResponse(HttpStatusCode.OK, req);
     }
 }
