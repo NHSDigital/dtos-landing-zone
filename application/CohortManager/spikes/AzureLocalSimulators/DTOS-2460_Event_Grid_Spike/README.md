@@ -1,6 +1,6 @@
 # SPIKE: Event Grid and Event Hub
 
-Both Event Grid and Event Hub don't have an emulator that we can use to develop locally, at least there's nothing that is directly supported by Azure Services. As a workaround, we need to simulate the behaviour instead but using tools and libraries that mimic the functionalities.
+Both Event Grid and Event Hub don't have an official emulator that we can use to develop locally, at least there's nothing that is directly supported by Azure Services. As a workaround, we need to simulate the behaviour instead but using tools and libraries that mimic the functionalities.
 
 ## Overview of Azure Event Grid and Azure Event Hub
 
