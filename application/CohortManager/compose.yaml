@@ -8,11 +8,11 @@ services:
     image: mcr.microsoft.com/azure-storage/azurite
     command: azurite -L -s --blobHost 0.0.0.0 --debug /debug.log
     ports:
-    - 10000:10000
-    - 10001:10001
-    - 10002:10002
-   # volumes:
-   #   - /data
+      - 10000:10000
+      - 10001:10001
+      - 10002:10002
+    # volumes:
+    #   - /data
 
   azurite-setup:
     container_name: azurite-setup
@@ -29,9 +29,9 @@ services:
     image: mcr.microsoft.com/azure-sql-edge:latest
     environment:
       SA_PASSWORD: ${PASSWORD}
-      ACCEPT_EULA: 'Y'
+      ACCEPT_EULA: "Y"
     build:
-      target: '/var/opt/mssql/data:z,U'
+      target: "/var/opt/mssql/data:z,U"
 
     #cap_add:
     #  - SYS_PTRACE
@@ -232,7 +232,6 @@ services:
       - ASPNETCORE_URLS=http://*:7075
       - CreateValidationExceptionURL=http://localhost:7070/api/CreateValidationException
 
-
   # Demographic Services
   demographic-data-management:
     container_name: demographic-data-management
@@ -254,8 +253,7 @@ services:
     environment:
       - ASPNETCORE_URLS=http://*:7077
 
-
-# Add Aggregation Service
+  # Add Aggregation Service
   retrieve-aggregation-data:
     container_name: retrieve-aggregate-data
     network_mode: host
