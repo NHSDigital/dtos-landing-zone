@@ -6,27 +6,46 @@ services:
     container_name: azurite
     network_mode: host
     image: mcr.microsoft.com/azure-storage/azurite
-    command: azurite --silent
+    command: azurite -L -s --blobHost 0.0.0.0 --debug /debug.log
+    ports:
+    - 10000:10000
+    - 10001:10001
+    - 10002:10002
+   # volumes:
+   #   - /data
+
+  azurite-setup:
+    container_name: azurite-setup
+    network_mode: host
+    build: ./Set-up/storage
 
   sql-edge:
     container_name: db
-    network_mode: host
-    image: mcr.microsoft.com/azure-sql-edge
+    user: root
+    ports:
+      - 1431:1431
+      - 1433:1433
+      - 1434:1434
+    image: mcr.microsoft.com/azure-sql-edge:latest
     environment:
-      - ACCEPT_EULA=Y
-      - MSSQL_SA_PASSWORD=${PASSWORD}
-    cap_add:
-      - SYS_PTRACE
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "curl -v --silent 127.0.0.1:1433 --stderr - | grep -q 'Empty reply from server'"
-        ]
-      interval: 15s
-      timeout: 15s
-      retries: 5
-      start_period: 30s
+      SA_PASSWORD: ${PASSWORD}
+      ACCEPT_EULA: 'Y'
+    build:
+      target: '/var/opt/mssql/data:z,U'
+
+    #cap_add:
+    #  - SYS_PTRACE
+
+    #healthcheck:
+    #  test:
+    #   [
+    #     "CMD-SHELL",
+    #     "curl -v --silent 127.0.0.1:1433 --stderr - | grep -q 'Empty reply from server'"
+    #   ]
+    # interval: 15s
+    # timeout: 15s
+    # retries: 5
+    # start_period: 30s
 
   db-setup:
     container_name: db-setup
@@ -46,14 +65,16 @@ services:
     build:
       context: ./src/Functions/
       dockerfile: CaasIntegration/receiveCaasFile/Dockerfile
+    ports:
+      - 7060:7060
     environment:
       - AzureWebJobsStorage=UseDevelopmentStorage=true
       - caasfolder_STORAGE=UseDevelopmentStorage=true
       - ASPNETCORE_URLS=http://*:7060
       - targetFunction=http://localhost:7061/api/processCaasFile
       - FileValidationURL=http://localhost:7073/api/FileValidation
-    depends_on:
-      - azurite
+    #depends_on:
+    #  - azurite
 
   process-caas-file:
     container_name: process-caas-file
@@ -113,7 +134,7 @@ services:
     environment:
       - ASPNETCORE_URLS=http://*:7066
       - SqlConnectionString=Server=localhost,1433;Database=${DB_NAME};User Id=SA;Password=${PASSWORD};TrustServerCertificate=True
-      - FUNCTIONS_WORKER_RUNTIME=dotnet-isolated
+      #- FUNCTIONS_WORKER_RUNTIME=dotnet-isolated
       - DtOsDatabaseConnectionString=Server=localhost,1433;Database=${DB_NAME};User Id=SA;Password=${PASSWORD};TrustServerCertificate=True
 
   mark-participant-eligible:
@@ -211,6 +232,7 @@ services:
       - ASPNETCORE_URLS=http://*:7075
       - CreateValidationExceptionURL=http://localhost:7070/api/CreateValidationException
 
+
   # Demographic Services
   demographic-data-management:
     container_name: demographic-data-management
@@ -228,11 +250,12 @@ services:
     network_mode: host
     build:
       context: ./src/Functions/
-      dockerfile: CohortDistribution/AggregateDataServices/RetrieveAggregate/Dockerfile
+      dockerfile: CohortDistribution/AggregateDataServices/AddAggregationData/Dockerfile
     environment:
       - ASPNETCORE_URLS=http://*:7077
 
-  # Add Aggregation Service
+
+# Add Aggregation Service
   retrieve-aggregation-data:
     container_name: retrieve-aggregate-data
     network_mode: host
@@ -241,15 +264,4 @@ services:
       dockerfile: CohortDistribution/AggregateDataServices/RetrieveAggregate/Dockerfile
     environment:
       - ASPNETCORE_URLS=http://*:7078
-      - DtOsDatabaseConnectionString=Server=localhost,1433;Database=${DB_NAME};User Id=SA;Password=${PASSWORD};TrustServerCertificate=True
-
-  # Remove Aggregation Service
-  remove-aggregation-data:
-    container_name: remove-aggregate-data
-    network_mode: host
-    build:
-      context: ./src/Functions/
-      dockerfile: CohortDistribution/AggregateDataServices/AddAggregationData/Dockerfile
-    environment:
-      - ASPNETCORE_URLS=http://*:7079
       - DtOsDatabaseConnectionString=Server=localhost,1433;Database=${DB_NAME};User Id=SA;Password=${PASSWORD};TrustServerCertificate=True
